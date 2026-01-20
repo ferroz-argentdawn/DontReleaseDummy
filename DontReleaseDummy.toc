@@ -1,0 +1,8 @@
+## Interface: 110007, 120000
+## Title: DontReleaseDummy
+## Notes: Prevents accidental "Release Spirit" with a Ctrl-hold timer.
+## Author: FerrozArgentDawn
+## Version: 1.1.0
+## SavedVariables: DontReleaseDummyDB
+## IconTexture: Interface\AddOns\DontReleaseDummy\Media\Drd
+DontReleaseDummy.lua
