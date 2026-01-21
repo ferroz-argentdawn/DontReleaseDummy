@@ -3,7 +3,7 @@ name: Publish to CurseForge
 on:
   push:
     tags:
-      - 'v*' # This must be indented 2 spaces
+      - 'v*'
 
 jobs:
   release:
