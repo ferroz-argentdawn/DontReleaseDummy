@@ -2,7 +2,9 @@
 local defaults = {
     holdTime = 2.0,
     onlyInInstance = false, -- If true, protection only works in Dungeons/Raids
+    height = 150
 }
+local FERROZ_COLOR = CreateColorFromHexString("ff8FB8DD")
 
 -- Constants
 local MIN_HOLD_TIME = 0.1
@@ -94,7 +96,7 @@ local function UpdateReleaseButton(self, elapsed)
             self.ctrlTimer = self.ctrlTimer + elapsed
             if self.ctrlTimer >= DontReleaseDummyDB.holdTime then
                 btn:Enable()
-                instruction:SetText("|cff00ff00UNLOCKED|r")
+                instruction:SetText(FERROZ_COLOR:WrapTextInColorCode("UNLOCKED"))
             else
                 btn:Disable()
                 local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.ctrlTimer)
@@ -110,6 +112,32 @@ local function UpdateReleaseButton(self, elapsed)
     end
 end
 
+-- Hook Frames
+local function init()
+    for i = 1, 4 do
+        local frame = _G["StaticPopup"..i]
+        if frame then
+            frame:HookScript("OnUpdate", UpdateReleaseButton)
+            frame:HookScript("OnShow", function(s)
+                s.ctrlTimer = 0
+                s.LayoutAdjusted = false
+            end)
+            frame:HookScript("OnHide", function(s)
+                -- Hide  custom elements
+                if s.AddonTitleText then s.AddonTitleText:Hide() end
+                if s.ReleaseLockText then s.ReleaseLockText:Hide() end
+                if s.SpacerTextRow then s.SpacerTextRow:Hide() end
+                -- Reset the layout flag
+                s.LayoutAdjusted = false
+                --  the frame height to a standard Blizzard size
+                s:SetHeight(defaults.height)
+            end)
+        end
+    end
+    local version = C_AddOns.GetAddOnMetadata("DontReleaseDummy", "Version") or "1.0.0"
+    print(FERROZ_COLOR:WrapTextInColorCode("[DRD] v" .. version) .. " loaded (/drd)")
+end
+
 -- Initialize Settings
 local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
@@ -119,17 +147,18 @@ f:SetScript("OnEvent", function(self, event, addonName)
         DontReleaseDummyDB = DontReleaseDummyDB or {}
         for k, v in pairs(defaults) do
             if DontReleaseDummyDB[k] == nil then DontReleaseDummyDB[k] = v end
-        end
-        
+        end       
         -- Validate existing holdTime value
         if DontReleaseDummyDB.holdTime and (DontReleaseDummyDB.holdTime < MIN_HOLD_TIME or DontReleaseDummyDB.holdTime > MAX_HOLD_TIME) then
             DontReleaseDummyDB.holdTime = defaults.holdTime
         end
-        
+        init()
         -- Unregister event after initialization
         self:UnregisterEvent("ADDON_LOADED")
     end
 end)
+
+
 
 -- Slash Commands
 SLASH_DONTRELEASE1 = "/drd"
@@ -139,14 +168,14 @@ SlashCmdList["DONTRELEASE"] = function(msg)
         local time = tonumber(arg)
         if time >= MIN_HOLD_TIME and time <= MAX_HOLD_TIME then
             DontReleaseDummyDB.holdTime = time
-            print(string.format("|cff00ff00DRD:|r Hold time set to %.1f seconds.", time))
+            print(string.format("%s Hold time set to %.1f seconds.", FERROZ_COLOR:WrapTextInColorCode("DRD:"), time))
         else
             print(string.format("|cffff0000DRD:|r Hold time must be between %.1f and %.1f seconds.", MIN_HOLD_TIME, MAX_HOLD_TIME))
         end
     elseif cmd == "instance" then
         DontReleaseDummyDB.onlyInInstance = not DontReleaseDummyDB.onlyInInstance
         local status = DontReleaseDummyDB.onlyInInstance and "ONLY in instances" or "ALWAYS"
-        print(string.format("|cff00ff00DRD:|r Protection is now active %s", status))
+        print(string.format("%s Protection is now active %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), status))
     elseif cmd == "test" then
         local p = StaticPopup1
         if p:IsShown() and p.which == "DEATH" then
@@ -157,36 +186,13 @@ SlashCmdList["DONTRELEASE"] = function(msg)
                 dialog.which = "DEATH"
                 -- Force the layout to update immediately
                 PrepareLayout(dialog)
-                print("|cFF00FF00DRD:|r Test window toggled ON")
+                print(FERROZ_COLOR:WrapTextInColorCode("DRD:") .. " Test window toggled ON")
+
             end
         end
     else
-        print("|cffffcc00DontReleaseDummy Commands:|r")
+        print(FERROZ_COLOR:WrapTextInColorCode("DontReleaseDummy Commands:"))
         print("  /drd time # - Set hold time (e.g. /drd time 3)")
         print("  /drd instance - Toggle between Always or Only in Dungeons/Raids")
-    end
-end
-
--- Hook Frames
-for i = 1, 4 do
-    local frame = _G["StaticPopup"..i]
-    if frame then
-        frame:HookScript("OnUpdate", UpdateReleaseButton)
-        frame:HookScript("OnShow", function(s)
-            s.ctrlTimer = 0
-            s.LayoutAdjusted = false
-        end)
-        frame:HookScript("OnHide", function(s)
-            -- Hide  custom elements
-            if s.AddonTitleText then s.AddonTitleText:Hide() end
-            if s.ReleaseLockText then s.ReleaseLockText:Hide() end
-            if s.SpacerTextRow then s.SpacerTextRow:Hide() end
-            
-            -- Reset the layout flag
-            s.LayoutAdjusted = false
-            
-            --  the frame height to a standard Blizzard size
-            s:SetHeight(150) 
-        end)
     end
 end
