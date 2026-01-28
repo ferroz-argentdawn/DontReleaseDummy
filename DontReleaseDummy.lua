@@ -12,32 +12,37 @@ local MAX_HOLD_TIME = 10.0
 local BOTTOM_PADDING = 20
 
 local function GetReleaseButton(self)
-    return (self.ButtonContainer and self.ButtonContainer.Button1) or 
-            (self.Buttons and self.Buttons[1]) or 
-            _G[self:GetName().."Button1"] or 
+    return (self.ButtonContainer and self.ButtonContainer.Button1) or
+            (self.Buttons and self.Buttons[1]) or
+            _G[self:GetName().."Button1"] or
             self.button1
 end
 
--- Function to check if we should apply protection based on location
-local function ShouldProtect()
+local function IsEligibleZone()
+    --if set to apply open world, apply
     if not DontReleaseDummyDB.onlyInInstance then return true end
-    
+    --else check isntance type
     local _, instanceType = GetInstanceInfo()
-    -- instanceType returns 'party' for dungeons, 'raid' for raids, or nil in some edge cases
     return (instanceType == "party" or instanceType == "raid")
+end
+local function ShouldProtect(parent)
+    -- Must be the death popup, must be in an eligible zone, and NOT in an active encounter
+    return parent.which == "DEATH"
+           and IsEligibleZone()
+           and not IsEncounterInProgress()
 end
 
 local function PrepareLayout(parent)
-    --parent:SetScale(1.26)
-    -- 1. Create/Ensure the Text FontStrings exist
+    if not ShouldProtect(parent) then
+        return
+    end
+    -- Create/Ensure the Text FontStrings exist
     if not parent.ReleaseLockText then
         parent.ReleaseLockText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     end
     if not parent.SpacerTextRow then
         parent.SpacerTextRow = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     end
-    
-    -- Creating a second FontString for the Addon Title (Row 2)
     if not parent.AddonTitleText then
         parent.AddonTitleText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
         parent.AddonTitleText:SetTextColor(0, 1, 0) -- Green title
@@ -45,70 +50,79 @@ local function PrepareLayout(parent)
     end
 
     if not parent.LayoutAdjusted then
-        -- Row 1: The Default Blizzard Text (Usually parent.text or parent.Text)
         local defaultText = parent.Text or parent.text or parent.SubText
         if defaultText then
             defaultText:ClearAllPoints()
             defaultText:SetPoint("TOP", parent, "TOP", 0, -10)
         end
 
-        -- Row 2: "Don't Release Dummy!"
         parent.AddonTitleText:ClearAllPoints()
         parent.AddonTitleText:SetPoint("TOP", defaultText or parent, "BOTTOM", 0, -10)
 
-        -- Row 3: The Buttons (ButtonContainer)
         if parent.ButtonContainer then
             parent.ButtonContainer:ClearAllPoints()
             parent.ButtonContainer:SetPoint("TOP", parent.AddonTitleText, "BOTTOM", 0, -10)
-            
-            -- Row 4: "Hold CTRL to Release"
             parent.ReleaseLockText:ClearAllPoints()
             parent.ReleaseLockText:SetPoint("TOP", parent.ButtonContainer, "BOTTOM", 0, -10)
         end
-        -- Row 5: spacer row
         parent.SpacerTextRow:ClearAllPoints()
         parent.SpacerTextRow:SetPoint("TOP", parent.ReleaseLockText, "BOTTOM", 0, -1 * BOTTOM_PADDING)
 
-        local totalHeight = math.abs(parent.SpacerTextRow:GetBottom() - parent:GetTop()) 
-        parent.AddonTitleText:Show() 
+        parent.AddonTitleText:Show()
         parent.ReleaseLockText:Show()
-        parent.SpacerTextRow:Show() 
-        parent:SetHeight(totalHeight)
+        parent.SpacerTextRow:Show()
+        --local totalHeight = math.abs(parent.SpacerTextRow:GetBottom() - parent:GetTop())
+        --parent:SetHeight(totalHeight)
         parent.LayoutAdjusted = true
+        if parent.Layout then
+            parent:Layout() -- Forces the frame to resize based on its children's anchors
+        end
     end
-    
     return parent.ReleaseLockText
 end
 
-local function UpdateReleaseButton(self, elapsed)
-    if self.which == "DEATH" and ShouldProtect() then
+local function CleanupUI(self)
+    if self.ReleaseLockText then self.ReleaseLockText:SetText("") end
+    if self.AddonTitleText then self.AddonTitleText:Hide() end
+    if self.SpacerTextRow then self.SpacerTextRow:Hide() end
+    if self.LayoutAdjusted then
         local btn = GetReleaseButton(self)
-        if not btn then return end
-        
-        local instruction = PrepareLayout(self)
-        
-        -- Initialize per-frame timer if needed
-        if not self.ctrlTimer then
-            self.ctrlTimer = 0
-        end
-        
-        if IsControlKeyDown() then
-            self.ctrlTimer = self.ctrlTimer + elapsed
-            if self.ctrlTimer >= DontReleaseDummyDB.holdTime then
-                btn:Enable()
-                instruction:SetText(FERROZ_COLOR:WrapTextInColorCode("UNLOCKED"))
-            else
-                btn:Disable()
-                local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.ctrlTimer)
-                instruction:SetText(string.format("|cffff0000HOLDING: %.1fs|r", remaining))
-            end
+        if btn then btn:Enable() end -- Run ONCE to hand control back
+        self.LayoutAdjusted = false   -- Now the addon stops touching the button
+        self:SetHeight(defaults.height)
+    end
+end
+
+local function UpdateReleaseButton(self, elapsed)
+    if not ShouldProtect(self) then
+        CleanupUI(self)
+        return
+    end
+
+    local btn = GetReleaseButton(self)
+    if not btn then return end
+
+    --fallback, set up if it hasn't been
+    if not self.LayoutAdjusted then PrepareLayout(self) end
+    if self.AddonTitleText then self.AddonTitleText:Show() end
+
+    -- Initialize per-frame timer if needed
+    self.ctrlTimer = self.ctrlTimer or 0
+
+    if IsControlKeyDown() then
+        self.ctrlTimer = self.ctrlTimer + elapsed
+        if self.ctrlTimer >= DontReleaseDummyDB.holdTime then
+            btn:Enable()
+            self.ReleaseLockText:SetText(GREEN_FONT_COLOR:WrapTextInColorCode("UNLOCKED"))
         else
-            self.ctrlTimer = 0
             btn:Disable()
-            instruction:SetText(string.format("|cffffcc00HOLD CTRL (%.1fs) TO RELEASE|r", DontReleaseDummyDB.holdTime))
+            local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.ctrlTimer)
+            self.ReleaseLockText:SetText(RED_FONT_COLOR:WrapTextInColorCode(string.format("HOLDING: %.1fs", remaining)))
         end
     else
-        if self.ReleaseLockText then self.ReleaseLockText:SetText("") end
+        self.ctrlTimer = 0
+        btn:Disable()
+        self.ReleaseLockText:SetText(NORMAL_FONT_COLOR:WrapTextInColorCode(string.format("HOLD CTRL (%.1fs) TO RELEASE", DontReleaseDummyDB.holdTime)))
     end
 end
 
@@ -121,16 +135,11 @@ local function init()
             frame:HookScript("OnShow", function(s)
                 s.ctrlTimer = 0
                 s.LayoutAdjusted = false
+                --set up the UI once
+                PrepareLayout(s)
             end)
             frame:HookScript("OnHide", function(s)
-                -- Hide  custom elements
-                if s.AddonTitleText then s.AddonTitleText:Hide() end
-                if s.ReleaseLockText then s.ReleaseLockText:Hide() end
-                if s.SpacerTextRow then s.SpacerTextRow:Hide() end
-                -- Reset the layout flag
-                s.LayoutAdjusted = false
-                --  the frame height to a standard Blizzard size
-                s:SetHeight(defaults.height)
+                CleanupUI(s)
             end)
         end
     end
