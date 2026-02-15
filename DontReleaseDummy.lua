@@ -1,8 +1,9 @@
--- Initial Defaults
-local defaults = {
+-- Initial DEFAULTS
+local DEFAULTS = {
     holdTime = 2.0,
     onlyInInstance = false, -- If true, protection only works in Dungeons/Raids
-    height = 150
+    height = 150,
+    epithet = "Dummy"
 }
 local FERROZ_COLOR = CreateColorFromHexString("ff8FB8DD")
 
@@ -10,6 +11,10 @@ local FERROZ_COLOR = CreateColorFromHexString("ff8FB8DD")
 local MIN_HOLD_TIME = 0.1
 local MAX_HOLD_TIME = 10.0
 local BOTTOM_PADDING = 20
+
+local function GetEpithet()
+    return DontReleaseDummyDB.epithet or DEFAULTS.epithet
+end
 
 local function GetReleaseButton(self)
     return (self.ButtonContainer and self.ButtonContainer.Button1) or
@@ -46,7 +51,7 @@ local function PrepareLayout(parent)
     if not parent.AddonTitleText then
         parent.AddonTitleText = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
         parent.AddonTitleText:SetTextColor(0, 1, 0) -- Green title
-        parent.AddonTitleText:SetText("Don't Release Dummy!")
+        parent.AddonTitleText:SetText("Don't Release "..GetEpithet().."!")
     end
 
     if not parent.LayoutAdjusted then
@@ -89,7 +94,7 @@ local function CleanupUI(self)
         local btn = GetReleaseButton(self)
         if btn then btn:Enable() end -- Run ONCE to hand control back
         self.LayoutAdjusted = false   -- Now the addon stops touching the button
-        self:SetHeight(defaults.height)
+        self:SetHeight(DEFAULTS.height)
     end
 end
 
@@ -114,6 +119,10 @@ local function UpdateReleaseButton(self, elapsed)
         if self.ctrlTimer >= DontReleaseDummyDB.holdTime then
             btn:Enable()
             self.ReleaseLockText:SetText(GREEN_FONT_COLOR:WrapTextInColorCode("UNLOCKED"))
+            if DontReleaseDummyDB.autoRelease and not self.autoReleasedFired then
+                self.autoReleasedFired = true
+                RepopMe()
+            end
         else
             btn:Disable()
             local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.ctrlTimer)
@@ -121,6 +130,7 @@ local function UpdateReleaseButton(self, elapsed)
         end
     else
         self.ctrlTimer = 0
+        self.autoReleasedFired = false
         btn:Disable()
         self.ReleaseLockText:SetText(NORMAL_FONT_COLOR:WrapTextInColorCode(string.format("HOLD CTRL (%.1fs) TO RELEASE", DontReleaseDummyDB.holdTime)))
     end
@@ -134,11 +144,13 @@ local function init()
             frame:HookScript("OnUpdate", UpdateReleaseButton)
             frame:HookScript("OnShow", function(s)
                 s.ctrlTimer = 0
+                s.autoReleasedFired = false
                 s.LayoutAdjusted = false
                 --set up the UI once
                 PrepareLayout(s)
             end)
             frame:HookScript("OnHide", function(s)
+                s.autoReleasedFired = false
                 CleanupUI(s)
             end)
         end
@@ -152,14 +164,14 @@ local f = CreateFrame("Frame")
 f:RegisterEvent("ADDON_LOADED")
 f:SetScript("OnEvent", function(self, event, addonName)
     if addonName == "DontReleaseDummy" then
-        -- Load saved vars or set defaults
+        -- Load saved vars or set DEFAULTS
         DontReleaseDummyDB = DontReleaseDummyDB or {}
-        for k, v in pairs(defaults) do
+        for k, v in pairs(DEFAULTS) do
             if DontReleaseDummyDB[k] == nil then DontReleaseDummyDB[k] = v end
         end       
         -- Validate existing holdTime value
         if DontReleaseDummyDB.holdTime and (DontReleaseDummyDB.holdTime < MIN_HOLD_TIME or DontReleaseDummyDB.holdTime > MAX_HOLD_TIME) then
-            DontReleaseDummyDB.holdTime = defaults.holdTime
+            DontReleaseDummyDB.holdTime = DEFAULTS.holdTime
         end
         init()
         -- Unregister event after initialization
@@ -181,6 +193,17 @@ SlashCmdList["DONTRELEASE"] = function(msg)
         else
             print(string.format("|cffff0000DRD:|r Hold time must be between %.1f and %.1f seconds.", MIN_HOLD_TIME, MAX_HOLD_TIME))
         end
+    elseif cmd == "epithet" or cmd == "insult" then
+        if arg and type(arg) == "string" and arg ~= "" and arg:match("%S") then
+            DontReleaseDummyDB.epithet = arg
+        else
+            DontReleaseDummyDB.epithet = DEFAULTS.epithet
+        end
+        print(string.format("%s Calling you %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), DontReleaseDummyDB.epithet))
+    elseif cmd == "auto" or cmd == "autorelease" then
+        DontReleaseDummyDB.autoRelease = not DontReleaseDummyDB.autoRelease
+        local status = DontReleaseDummyDB.autoRelease and "Enabled" or "Disabled"
+        print(string.format("%s Autorelease is now %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), status))
     elseif cmd == "instance" then
         DontReleaseDummyDB.onlyInInstance = not DontReleaseDummyDB.onlyInInstance
         local status = DontReleaseDummyDB.onlyInInstance and "ONLY in instances" or "ALWAYS"
@@ -201,6 +224,8 @@ SlashCmdList["DONTRELEASE"] = function(msg)
         end
     else
         print(FERROZ_COLOR:WrapTextInColorCode("DontReleaseDummy Commands:"))
+        print("  /drd auto - Autorelease after holding ctrl")
+        print("  /drd epithet <String> - Change the name you get called")
         print("  /drd time # - Set hold time (e.g. /drd time 3)")
         print("  /drd instance - Toggle between Always or Only in Dungeons/Raids")
     end
