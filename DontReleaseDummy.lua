@@ -1,17 +1,31 @@
--- Initial DEFAULTS
+--constants
+local INSTANCE_TYPE = {
+    ALWAYS = {displayText = "Always", key="ALWAYS", query=nil},
+    DUNGEONS = {displayText = "Only in Dungeons",key="DUNGEONS", query={"party"}},
+    RAIDS = {displayText = "Only in Raids", key="RAIDS",query={"raid"}},
+    DUNGEONS_AND_RAIDS = {displayText = "Only in Dungeons or Raids",key="DUNGEONS_AND_RAIDS", query={"party","raid"}},
+}
+
+INSTANCE_TYPE.ALWAYS.nextVal = INSTANCE_TYPE.DUNGEONS
+INSTANCE_TYPE.DUNGEONS.nextVal = INSTANCE_TYPE.RAIDS
+INSTANCE_TYPE.RAIDS.nextVal = INSTANCE_TYPE.DUNGEONS_AND_RAIDS
+INSTANCE_TYPE.DUNGEONS_AND_RAIDS.nextVal = INSTANCE_TYPE.ALWAYS
+
+local HOLD_KEYS = {"CTRL", "ALT", "SHIFT"}
 local DEFAULTS = {
     holdTime = 2.0,
-    onlyInInstance = false, -- If true, protection only works in Dungeons/Raids
+    instanceType = INSTANCE_TYPE.ALWAYS.key, -- If true, protection only works in Dungeons/Raids
     height = 150,
-    epithet = "Dummy"
+    epithet = "Dummy",
+    keyName = HOLD_KEYS[1]
 }
 local FERROZ_COLOR = CreateColorFromHexString("ff8FB8DD")
 
--- Constants
 local MIN_HOLD_TIME = 0.1
 local MAX_HOLD_TIME = 10.0
 local BOTTOM_PADDING = 20
 
+--functions
 local function GetEpithet()
     return DontReleaseDummyDB.epithet or DEFAULTS.epithet
 end
@@ -24,11 +38,15 @@ local function GetReleaseButton(self)
 end
 
 local function IsEligibleZone()
-    --if set to apply open world, apply
-    if not DontReleaseDummyDB.onlyInInstance then return true end
-    --else check isntance type
+    local setting = INSTANCE_TYPE[DontReleaseDummyDB.instanceType] or INSTANCE_TYPE.ALWAYS
+    if not setting.query then return true end -- always
     local _, instanceType = GetInstanceInfo()
-    return (instanceType == "party" or instanceType == "raid")
+    for _, allowedType in ipairs(setting.query) do
+        if instanceType == allowedType then
+            return true
+        end
+    end
+    return false
 end
 local function ShouldProtect(parent)
     -- Must be the death popup, must be in an eligible zone, and NOT in an active encounter
@@ -98,6 +116,14 @@ local function CleanupUI(self)
     end
 end
 
+local function IsHoldKeyDown()
+    local key = DontReleaseDummyDB.keyName
+    if key == "SHIFT" then return IsShiftKeyDown() end
+    if key == "ALT" then return IsAltKeyDown() end
+    if key == "CTRL" then return IsControlKeyDown() end
+    return IsControlKeyDown() -- default to ctrl
+end
+
 local function UpdateReleaseButton(self, elapsed)
     if not ShouldProtect(self) then
         CleanupUI(self)
@@ -112,11 +138,11 @@ local function UpdateReleaseButton(self, elapsed)
     if self.AddonTitleText then self.AddonTitleText:Show() end
 
     -- Initialize per-frame timer if needed
-    self.ctrlTimer = self.ctrlTimer or 0
+    self.holdTimer = self.holdTimer or 0
 
-    if IsControlKeyDown() then
-        self.ctrlTimer = self.ctrlTimer + elapsed
-        if self.ctrlTimer >= DontReleaseDummyDB.holdTime then
+    if IsHoldKeyDown() then
+        self.holdTimer = self.holdTimer + elapsed
+        if self.holdTimer >= DontReleaseDummyDB.holdTime then
             btn:Enable()
             self.ReleaseLockText:SetText(GREEN_FONT_COLOR:WrapTextInColorCode("UNLOCKED"))
             if DontReleaseDummyDB.autoRelease and not self.autoReleasedFired then
@@ -125,14 +151,14 @@ local function UpdateReleaseButton(self, elapsed)
             end
         else
             btn:Disable()
-            local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.ctrlTimer)
+            local remaining = math.max(0, DontReleaseDummyDB.holdTime - self.holdTimer)
             self.ReleaseLockText:SetText(RED_FONT_COLOR:WrapTextInColorCode(string.format("HOLDING: %.1fs", remaining)))
         end
     else
-        self.ctrlTimer = 0
+        self.holdTimer = 0
         self.autoReleasedFired = false
         btn:Disable()
-        self.ReleaseLockText:SetText(NORMAL_FONT_COLOR:WrapTextInColorCode(string.format("HOLD CTRL (%.1fs) TO RELEASE", DontReleaseDummyDB.holdTime)))
+        self.ReleaseLockText:SetText(NORMAL_FONT_COLOR:WrapTextInColorCode(string.format("HOLD %s (%.1fs) TO RELEASE", DontReleaseDummyDB.keyName, DontReleaseDummyDB.holdTime)))
     end
 end
 
@@ -143,7 +169,7 @@ local function init()
         if frame then
             frame:HookScript("OnUpdate", UpdateReleaseButton)
             frame:HookScript("OnShow", function(s)
-                s.ctrlTimer = 0
+                s.holdTimer = 0
                 s.autoReleasedFired = false
                 s.LayoutAdjusted = false
                 --set up the UI once
@@ -166,6 +192,15 @@ f:SetScript("OnEvent", function(self, event, addonName)
     if addonName == "DontReleaseDummy" then
         -- Load saved vars or set DEFAULTS
         DontReleaseDummyDB = DontReleaseDummyDB or {}
+        if DontReleaseDummyDB.onlyInInstance ~= nil then
+            if DontReleaseDummyDB.onlyInInstance then
+                DontReleaseDummyDB.instanceType = INSTANCE_TYPE.DUNGEONS_AND_RAIDS.key
+            else
+                DontReleaseDummyDB.instanceType = INSTANCE_TYPE.ALWAYS.key
+            end
+            DontReleaseDummyDB.onlyInInstance = nil
+        end
+
         for k, v in pairs(DEFAULTS) do
             if DontReleaseDummyDB[k] == nil then DontReleaseDummyDB[k] = v end
         end       
@@ -178,8 +213,6 @@ f:SetScript("OnEvent", function(self, event, addonName)
         self:UnregisterEvent("ADDON_LOADED")
     end
 end)
-
-
 
 -- Slash Commands
 SLASH_DONTRELEASE1 = "/drd"
@@ -205,9 +238,23 @@ SlashCmdList["DONTRELEASE"] = function(msg)
         local status = DontReleaseDummyDB.autoRelease and "Enabled" or "Disabled"
         print(string.format("%s Autorelease is now %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), status))
     elseif cmd == "instance" then
-        DontReleaseDummyDB.onlyInInstance = not DontReleaseDummyDB.onlyInInstance
-        local status = DontReleaseDummyDB.onlyInInstance and "ONLY in instances" or "ALWAYS"
-        print(string.format("%s Protection is now active %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), status))
+        local instanceType = INSTANCE_TYPE[DontReleaseDummyDB.instanceType] or INSTANCE_TYPE.ALWAYS
+        instanceType = instanceType.nextVal
+        DontReleaseDummyDB.instanceType = instanceType.key
+        print(string.format("%s Protection is now active %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), instanceType.displayText))
+    elseif cmd == "key" then
+        local selectedKey = nil
+        local nextIndex = nil
+        local input = arg and arg:upper() or nil
+        for i, key in ipairs(HOLD_KEYS) do
+            if input == key then selectedKey = key; break; end
+            if key == DontReleaseDummyDB.keyName then nextIndex = (i % #HOLD_KEYS) + 1 end
+        end
+        if selectedKey == nil then
+            selectedKey = HOLD_KEYS[nextIndex or 1]
+        end
+        DontReleaseDummyDB.keyName = selectedKey
+        print(string.format("%s Modifier key set to: %s", FERROZ_COLOR:WrapTextInColorCode("DRD:"), DontReleaseDummyDB.keyName))
     elseif cmd == "test" then
         local p = StaticPopup1
         if p:IsShown() and p.which == "DEATH" then
@@ -224,9 +271,10 @@ SlashCmdList["DONTRELEASE"] = function(msg)
         end
     else
         print(FERROZ_COLOR:WrapTextInColorCode("DontReleaseDummy Commands:"))
-        print("  /drd auto - Autorelease after holding ctrl")
-        print("  /drd epithet <String> - Change the name you get called")
-        print("  /drd time # - Set hold time (e.g. /drd time 3)")
-        print("  /drd instance - Toggle between Always or Only in Dungeons/Raids")
+        print("  /drd auto - Autorelease after the hold timer.")
+        print("  /drd epithet <String> - Change your 'Dummy' nickname.")
+        print("  /drd time # - Set hold duration (0.1 to 10 seconds).")
+        print("  /drd instance - Cycle mode: Always, Dungeons, Raids, or Both.")
+        print("  /drd key <type> - Change modifier to CTRL, ALT, or SHIFT.")
     end
 end
