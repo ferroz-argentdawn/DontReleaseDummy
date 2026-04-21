@@ -1,8 +1,8 @@
-## Interface: 120000
+## Interface: 120005
 ## Title: DontReleaseDummy
 ## Notes: Prevents accidental "Release Spirit" with a Ctrl-hold timer.
 ## Author: FerrozArgentDawn
-## Version: 1.1.11
+## Version: 1.1.12
 ## X-Curse-Project-ID: 1428881
 ## SavedVariables: DontReleaseDummyDB
 ## IconTexture: Interface\AddOns\DontReleaseDummy\Media\Drd
